@@ -1,13 +1,27 @@
 extern crate gl;
 extern crate glfw;
 
+use gl::types::*;
+use glfw::{Action, Context, Key};
 use std::{
     ffi::{c_void, CString},
     mem::{size_of, size_of_val},
     ptr::null,
+    string::FromUtf8Error,
 };
+use thiserror::Error;
 
-use glfw::{Action, Context, Key};
+#[derive(Debug, Error)]
+pub enum ShaderError {
+    #[error("Error while compiling shader: {0}")]
+    CompilationError(String),
+    #[error("Error while linking shaders: {0}")]
+    LinkingError(String),
+    #[error{"{0}"}]
+    Utf8Error(#[from] FromUtf8Error),
+    #[error{"{0}"}]
+    NulError(#[from] std::ffi::NulError),
+}
 
 fn main() {
     let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
@@ -29,46 +43,131 @@ fn main() {
 
     // SHADERS
 
-    let vertex_shader_src = CString::new(
-        "
+    let vertex_shader_src = "
         #version 430 core
         layout (location = 0) in vec3 aPos;
         void main()
         {
             gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);
-        }",
-    )
-    .unwrap();
+        }";
 
-    let fragment_shader_src = CString::new(
-        "
+    let fragment_shader_src = "
         #version 430 core
         out vec4 FragColor;
         void main()
         {
            FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);
-        }",
-    )
-    .unwrap();
+        }";
+
+    struct Shader {
+        id: u32,
+    }
+
+    impl Shader {
+        unsafe fn new(shader_source: &str, shader_type: GLenum) -> Result<Self, ShaderError> {
+            let shader = Self {
+                id: gl::CreateShader(shader_type),
+            };
+            let shader_source = CString::new(shader_source).unwrap();
+
+            gl::ShaderSource(shader.id, 1, &shader_source.as_ptr(), null());
+            gl::CompileShader(shader.id);
+
+            // check for shader compilation errors
+            let mut success: GLint = 0;
+            gl::GetShaderiv(shader.id, gl::COMPILE_STATUS, &mut success);
+
+            if success == 1 {
+                Ok(shader)
+            } else {
+                let mut error_log_size: GLint = 0;
+                gl::GetShaderiv(shader.id, gl::INFO_LOG_LENGTH, &mut error_log_size);
+                let mut error_log: Vec<u8> = Vec::with_capacity(error_log_size as usize);
+                gl::GetShaderInfoLog(
+                    shader.id,
+                    error_log_size,
+                    &mut error_log_size,
+                    error_log.as_mut_ptr() as *mut _,
+                );
+
+                error_log.set_len(error_log_size as usize);
+                let log = String::from_utf8(error_log).unwrap();
+                Err(ShaderError::CompilationError(log))
+            }
+        }
+    }
+
+    impl Drop for Shader {
+        fn drop(&mut self) {
+            unsafe {
+                gl::DeleteShader(self.id);
+            }
+        }
+    }
+
+    struct ShaderProgram {
+        id: u32,
+    }
+
+    impl ShaderProgram {
+        unsafe fn new(shaders: &[Shader]) -> Result<Self, ShaderError> {
+            let program = Self {
+                id: gl::CreateProgram(),
+            };
+
+            for shader in shaders {
+                gl::AttachShader(program.id, shader.id);
+            }
+
+            gl::LinkProgram(program.id);
+
+            let mut sucess: i32 = 0;
+            gl::GetProgramiv(program.id, gl::LINK_STATUS, &mut sucess);
+
+            if sucess == 1 {
+                Ok(program)
+            } else {
+                let mut error_log_size: i32 = 0;
+                gl::GetProgramiv(program.id, gl::INFO_LOG_LENGTH, &mut error_log_size);
+                let mut error_log: Vec<u8> = Vec::with_capacity(error_log_size as usize);
+                gl::GetProgramInfoLog(
+                    program.id,
+                    error_log_size,
+                    &mut error_log_size,
+                    error_log.as_mut_ptr() as *mut _,
+                );
+
+                error_log.set_len(error_log_size as usize);
+                let log = String::from_utf8(error_log)?;
+                Err(ShaderError::LinkingError(log))
+            }
+        }
+    }
+
+    impl ShaderProgram {
+        unsafe fn apply(&self) {
+            gl::UseProgram(self.id);
+        }
+    }
+
+    impl Drop for ShaderProgram {
+        fn drop(&mut self) {
+            unsafe {
+                gl::DeleteShader(self.id);
+            }
+        }
+    }
 
     let shader_program = unsafe {
-        // Create Vertex Shader
-        let vertex_shader: u32 = gl::CreateShader(gl::VERTEX_SHADER);
-        gl::ShaderSource(vertex_shader, 1, &vertex_shader_src.as_ptr(), null());
-        gl::CompileShader(vertex_shader);
+        let vertex_shader = Shader::new(&vertex_shader_src, gl::VERTEX_SHADER)
+            .expect("Failed to create Vertex Shader");
+        let fragment_shader = Shader::new(&fragment_shader_src, gl::FRAGMENT_SHADER)
+            .expect("Failed to create Fragment Shader");
+        let shader_program = ShaderProgram::new(&[vertex_shader, fragment_shader])
+            .expect("Failed to create Shader Program");
 
-        // Create Fragment Shader
-        let fragment_shader: u32 = gl::CreateShader(gl::FRAGMENT_SHADER);
-        gl::ShaderSource(fragment_shader, 1, &fragment_shader_src.as_ptr(), null());
-        gl::CompileShader(fragment_shader);
-
-        // Create Shader Program
-        let shader_program = gl::CreateProgram();
-        gl::AttachShader(shader_program, vertex_shader);
-        gl::AttachShader(shader_program, fragment_shader);
-        gl::LinkProgram(shader_program);
         shader_program
-    };
+    };    
 
     type Vertex = [f32; 3];
     let vertex_data: [Vertex; 4] = [
@@ -126,7 +225,7 @@ fn main() {
             gl::Clear(gl::COLOR_BUFFER_BIT);
 
             // Draw
-            gl::UseProgram(shader_program);
+            shader_program.apply();
             gl::BindVertexArray(vertex_array);
 
             // gl::DrawArrays(gl::TRIANGLES, 0, 6);
