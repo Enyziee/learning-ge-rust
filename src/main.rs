@@ -32,7 +32,7 @@ fn main() {
     ));
 
     let (mut window, events) = glfw
-        .create_window(854, 480, "OpenGL in Rust", glfw::WindowMode::Windowed)
+        .create_window(800, 600, "OpenGL in Rust", glfw::WindowMode::Windowed)
         .expect("Failed to create GLFW window.");
 
     window.set_key_polling(true);
@@ -45,19 +45,22 @@ fn main() {
 
     let vertex_shader_src = "
         #version 430 core
-        layout (location = 0) in vec3 aPos;
-        layout (location = 1) in vec3 aColor;
+        layout (location = 0) in vec3 vPosition;
+        layout (location = 1) in vec3 vColor;
+        out vec3 color;
         void main()
         {
-            gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);
+            color = vColor;
+            gl_Position = vec4(vPosition, 1.0);
         }";
 
     let fragment_shader_src = "
         #version 430 core
+        in vec3 color;
         out vec4 FragColor;
         void main()
         {
-           FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);
+           FragColor = vec4(color, 1.0f);
         }";
 
     struct Shader {
@@ -197,7 +200,7 @@ fn main() {
 
             gl::BufferData(
                 self.buffer_type,
-                size_of_val(data) as isize,
+                size_of_val(data_bytes) as isize,
                 data.as_ptr() as *const c_void,
                 usage,
             );
@@ -218,30 +221,15 @@ fn main() {
 
     unsafe {
         let mut vertex_array: u32 = 0;
-        let mut element_array: u32 = 0;
-        let mut vertex_buffer: u32 = 0;
+        let index_array = Buffer::new(gl::ELEMENT_ARRAY_BUFFER);
+        let vertex_buffer = Buffer::new(gl::ARRAY_BUFFER);
+        let color_buffer = Buffer::new(gl::ARRAY_BUFFER);
 
         gl::GenVertexArrays(1, &mut vertex_array);
-        gl::GenBuffers(1, &mut vertex_buffer);
-        gl::GenBuffers(1, &mut element_array);
-
         gl::BindVertexArray(vertex_array);
 
-        gl::BindBuffer(gl::ARRAY_BUFFER, vertex_buffer);
-        gl::BufferData(
-            gl::ARRAY_BUFFER,
-            size_of_val(&vertex_positions) as isize,
-            vertex_positions.as_ptr() as *const c_void,
-            gl::STATIC_DRAW,
-        );
-
-        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, element_array);
-        gl::BufferData(
-            gl::ELEMENT_ARRAY_BUFFER,
-            size_of_val(&index) as isize,
-            index.as_ptr() as *const c_void,
-            gl::STATIC_DRAW,
-        );
+        vertex_buffer.bind();
+        vertex_buffer.set_data(&vertex_positions, gl::STATIC_DRAW);
 
         gl::VertexAttribPointer(
             0,
@@ -252,6 +240,22 @@ fn main() {
             0 as *const c_void,
         );
         gl::EnableVertexAttribArray(0);
+
+        color_buffer.bind();
+        color_buffer.set_data(&vertex_colors, gl::STATIC_DRAW);
+
+        gl::VertexAttribPointer(
+            1,
+            3,
+            gl::FLOAT,
+            gl::FALSE,
+            size_of::<Vertex>() as i32,
+            0 as *const c_void,
+        );
+        gl::EnableVertexAttribArray(1);
+
+        index_array.bind();
+        index_array.set_data(&index, gl::STATIC_DRAW);
 
         while !window.should_close() {
             glfw.poll_events();
