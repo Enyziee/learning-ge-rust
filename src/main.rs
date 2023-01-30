@@ -45,19 +45,29 @@ fn main() {
 
     let vertex_shader_src = "
         #version 430 core
+
         layout (location = 0) in vec3 vPosition;
         layout (location = 1) in vec3 vColor;
+
         out vec3 color;
+
+        uniform float xPosition;
+        uniform float yPosition;
+
         void main()
         {
             color = vColor;
-            gl_Position = vec4(vPosition, 1.0);
+            gl_Position = vec4((vPosition.x + xPosition), (vPosition.y + yPosition), vPosition.z, 1.0);
         }";
 
     let fragment_shader_src = "
         #version 430 core
         in vec3 color;
         out vec4 FragColor;
+
+        uniform float xPosition;
+        uniform float yPosition;
+
         void main()
         {
            FragColor = vec4(color, 1.0f);
@@ -214,10 +224,22 @@ fn main() {
     }
 
     type Vertex = [f32; 3];
-    let vertex_positions: [Vertex; 3] = [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
+    // let vertex_positions: [Vertex; 3] = [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
     let vertex_colors: [Vertex; 3] = [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
 
-    let index = [0, 1, 2];
+    // let index = [0, 1, 2];
+
+    let vertices: [Vertex; 4] = [
+        [0.5, 0.5, 0.0],   // top right
+        [0.5, -0.5, 0.0],  // bottom right
+        [-0.5, -0.5, 0.0], // bottom left
+        [-0.5, 0.5, 0.0],  // top left
+    ];
+    let indices = [
+        // note that we start from 0!
+        0, 1, 3, // first triangle
+        1, 2, 3, // second triangle
+    ];
 
     unsafe {
         let mut vertex_array: u32 = 0;
@@ -229,7 +251,7 @@ fn main() {
         gl::BindVertexArray(vertex_array);
 
         vertex_buffer.bind();
-        vertex_buffer.set_data(&vertex_positions, gl::STATIC_DRAW);
+        vertex_buffer.set_data(&vertices, gl::STATIC_DRAW);
 
         gl::VertexAttribPointer(
             0,
@@ -255,7 +277,11 @@ fn main() {
         gl::EnableVertexAttribArray(1);
 
         index_array.bind();
-        index_array.set_data(&index, gl::STATIC_DRAW);
+        index_array.set_data(&indices, gl::STATIC_DRAW);
+
+        // let uniform_name: Vec<u8> = Vec::from("xPosition");
+        let mut x_value = 0.0;
+        let mut y_value = 0.0;
 
         while !window.should_close() {
             glfw.poll_events();
@@ -267,6 +293,16 @@ fn main() {
             shader_program.apply();
             gl::BindVertexArray(vertex_array);
 
+            let uniform_name = CString::new("xPosition").unwrap();
+            let uniform_location_x =
+                gl::GetUniformLocation(shader_program.id, uniform_name.into_raw());
+
+            let uniform_name = CString::new("yPosition").unwrap();
+            let uniform_location_y =
+                gl::GetUniformLocation(shader_program.id, uniform_name.into_raw());
+
+            // gl::Uniform1f(uniform_location, value);
+
             // gl::DrawArrays(gl::TRIANGLES, 0, 6);
             gl::DrawElements(
                 gl::TRIANGLES,
@@ -275,8 +311,31 @@ fn main() {
                 0 as *const c_void,
             );
 
+            let movement = 0.02;
+
             window.swap_buffers();
             for (_, event) in glfw::flush_messages(&events) {
+                match event {
+                    glfw::WindowEvent::Key(Key::Right, _, Action::Repeat, _) => {
+                        x_value += movement;
+                        gl::Uniform1f(uniform_location_x, x_value);
+                    }
+                    glfw::WindowEvent::Key(Key::Left, _, Action::Repeat, _) => {
+                        x_value -= movement;
+                        gl::Uniform1f(uniform_location_x, x_value);
+                    }
+                    glfw::WindowEvent::Key(Key::Up, _, Action::Repeat, _) => {
+                        y_value += movement;
+                        gl::Uniform1f(uniform_location_y, y_value);
+                    }
+                    glfw::WindowEvent::Key(Key::Down, _, Action::Repeat, _) => {
+                        y_value -= movement;
+                        gl::Uniform1f(uniform_location_y, y_value);
+                    }
+
+                    _ => {}
+                }
+
                 handle_window_event(&mut window, event);
             }
         }
@@ -294,6 +353,7 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
             println!("Wireframe ON");
             gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
         },
+
         _ => {}
     }
 }
