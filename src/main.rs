@@ -46,6 +46,7 @@ fn main() {
     let vertex_shader_src = "
         #version 430 core
         layout (location = 0) in vec3 aPos;
+        layout (location = 1) in vec3 aColor;
         void main()
         {
             gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);
@@ -165,19 +166,55 @@ fn main() {
             .expect("Failed to create Fragment Shader");
         let shader_program = ShaderProgram::new(&[vertex_shader, fragment_shader])
             .expect("Failed to create Shader Program");
-
         shader_program
-    };    
+    };
+
+    struct Buffer {
+        id: u32,
+        buffer_type: GLenum,
+    }
+
+    impl Buffer {
+        unsafe fn new(buffer_type: GLenum) -> Self {
+            let mut buffer = Self { id: 0, buffer_type };
+
+            gl::GenBuffers(1, &mut buffer.id);
+
+            return buffer;
+        }
+    }
+
+    impl Buffer {
+        unsafe fn bind(&self) {
+            gl::BindBuffer(self.buffer_type, self.id);
+        }
+    }
+
+    impl Buffer {
+        unsafe fn set_data<D>(&self, data: &[D], usage: GLuint) {
+            self.bind();
+            let (_, data_bytes, _) = data.align_to::<f32>();
+
+            gl::BufferData(
+                self.buffer_type,
+                size_of_val(data) as isize,
+                data.as_ptr() as *const c_void,
+                usage,
+            );
+        }
+    }
+
+    impl Drop for Buffer {
+        fn drop(&mut self) {
+            unsafe { gl::DeleteBuffers(1, [self.id].as_mut_ptr()) }
+        }
+    }
 
     type Vertex = [f32; 3];
-    let vertex_data: [Vertex; 4] = [
-        [0.5, 0.5, 0.0],
-        [0.5, -0.5, 0.0],
-        [-0.5, -0.5, 0.0],
-        [-0.5, 0.5, 0.0],
-    ];
+    let vertex_positions: [Vertex; 3] = [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
+    let vertex_colors: [Vertex; 3] = [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
 
-    let index = [0, 1, 2, 0, 2, 3];
+    let index = [0, 1, 2];
 
     unsafe {
         let mut vertex_array: u32 = 0;
@@ -193,8 +230,8 @@ fn main() {
         gl::BindBuffer(gl::ARRAY_BUFFER, vertex_buffer);
         gl::BufferData(
             gl::ARRAY_BUFFER,
-            size_of_val(&vertex_data) as isize,
-            vertex_data.as_ptr() as *const c_void,
+            size_of_val(&vertex_positions) as isize,
+            vertex_positions.as_ptr() as *const c_void,
             gl::STATIC_DRAW,
         );
 
@@ -216,12 +253,10 @@ fn main() {
         );
         gl::EnableVertexAttribArray(0);
 
-        // gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
-
         while !window.should_close() {
             glfw.poll_events();
 
-            gl::ClearColor(0.2, 0.3, 0.3, 1.0);
+            // gl::ClearColor(0.2, 0.3, 0.3, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT);
 
             // Draw
@@ -247,6 +282,14 @@ fn main() {
 fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
     match event {
         glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => window.set_should_close(true),
+        glfw::WindowEvent::Key(Key::Num1, _, Action::Press, _) => unsafe {
+            println!("Wireframe OFF");
+            gl::PolygonMode(gl::FRONT_AND_BACK, gl::FILL);
+        },
+        glfw::WindowEvent::Key(Key::Num2, _, Action::Press, _) => unsafe {
+            println!("Wireframe ON");
+            gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
+        },
         _ => {}
     }
 }
